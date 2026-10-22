@@ -32,7 +32,7 @@ class TaskDatabase {
     _db = await factory.openDatabase(
       path,
       options: OpenDatabaseOptions(
-        version: 1,
+        version: 2,
         onCreate: (db, version) async {
           await db.execute('''CREATE TABLE tasks (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -45,10 +45,28 @@ class TaskDatabase {
           created_at TEXT NOT NULL
         )''');
           await db.execute('CREATE INDEX tasks_owner ON tasks(owner)');
+          await _createAccounts(db);
+        },
+        onUpgrade: (db, oldVersion, newVersion) async {
+          if (oldVersion < 2) await _createAccounts(db);
         },
       ),
     );
     return _db!;
+  }
+
+  static Future<void> _createAccounts(Database db) async {
+    await db.execute('''CREATE TABLE users (
+      username TEXT PRIMARY KEY,
+      password_hash TEXT NOT NULL,
+      salt TEXT NOT NULL,
+      iterations INTEGER NOT NULL
+    )''');
+    await db.execute('''CREATE TABLE sessions (
+      token TEXT PRIMARY KEY,
+      username TEXT NOT NULL REFERENCES users(username),
+      expires_at INTEGER NOT NULL
+    )''');
   }
 
   Future<List<Task>> readTasks(String owner) async {

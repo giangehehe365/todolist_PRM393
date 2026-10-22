@@ -35,11 +35,97 @@ class MemoryTasks extends TaskDatabase {
   }
 }
 
+// Keep widget tests deterministic; real SQLite authentication is covered separately.
+class WidgetSessions extends SessionStore {
+  WidgetSessions(TaskDatabase database) : super(database: database);
+  final passwords = <String, String>{'alice': 'demo12345'};
+  String? user;
+
+  @override
+  Future<String?> restore() async => user;
+
+  @override
+  Future<void> register(String username, String password) async {
+    final name = username.trim().toLowerCase();
+    if (passwords.containsKey(name)) {
+      throw const AuthException('Tên đăng nhập đã tồn tại');
+    }
+    passwords[name] = password;
+  }
+
+  @override
+  Future<void> login(String username, String password) async {
+    final name = username.trim().toLowerCase();
+    if (passwords[name] != password) {
+      throw const AuthException('Tên đăng nhập hoặc mật khẩu không đúng');
+    }
+    await (await SharedPreferences.getInstance()).setString(
+      SessionStore.sessionKey,
+      'test-token',
+    );
+    user = name;
+  }
+
+  @override
+  Future<void> logout() async {
+    await (await SharedPreferences.getInstance()).remove(
+      SessionStore.sessionKey,
+    );
+    user = null;
+  }
+}
+
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
+  testWidgets('Registration validates confirmation and creates an account', (
+    tester,
+  ) async {
+    final database = MemoryTasks();
+    final sessions = WidgetSessions(database);
+    await tester.pumpWidget(TodoApp(database: database, sessions: sessions));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('switchAuth')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('username')), 'bob');
+    await tester.enterText(find.byKey(const Key('password')), 'abc');
+    await tester.enterText(
+      find.byKey(const Key('confirmPassword')),
+      'different',
+    );
+    await tester.ensureVisible(find.text('Đăng ký'));
+    await tester.tap(find.text('Đăng ký'));
+    await tester.pumpAndSettle();
+    expect(find.text('Mật khẩu phải có ít nhất 8 ký tự'), findsOneWidget);
+    expect(find.text('Mật khẩu nhập lại không khớp'), findsOneWidget);
+    await tester.enterText(find.byKey(const Key('password')), 'Password123!');
+    await tester.enterText(
+      find.byKey(const Key('confirmPassword')),
+      'Password123!',
+    );
+    await tester.ensureVisible(find.text('Đăng ký'));
+    await tester.tap(find.text('Đăng ký'));
+    await tester.pumpAndSettle();
+    expect(find.text('TODOLIST'), findsOneWidget);
+    expect(await sessions.restore(), 'bob');
+    await tester.tap(find.byTooltip('Logout'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('switchAuth')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('username')), 'BOB');
+    await tester.enterText(find.byKey(const Key('password')), 'Password123!');
+    await tester.enterText(
+      find.byKey(const Key('confirmPassword')),
+      'Password123!',
+    );
+    await tester.ensureVisible(find.text('Đăng ký'));
+    await tester.tap(find.text('Đăng ký'));
+    await tester.pumpAndSettle();
+    expect(find.text('Tên đăng nhập đã tồn tại'), findsOneWidget);
+    expect(find.text('TODOLIST'), findsNothing);
+  });
   testWidgets('Login validation, restored session and logout', (tester) async {
     final database = MemoryTasks();
-    final sessions = SessionStore();
+    final sessions = WidgetSessions(database);
     await tester.pumpWidget(TodoApp(database: database, sessions: sessions));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Login'));
@@ -47,28 +133,29 @@ void main() {
     expect(find.text('Vui lòng nhập email hoặc tên đăng nhập'), findsOneWidget);
     expect(find.text('Vui lòng nhập mật khẩu'), findsOneWidget);
     await tester.enterText(find.byKey(const Key('username')), ' Alice ');
-    await tester.enterText(find.byKey(const Key('password')), 'demo');
+    await tester.enterText(find.byKey(const Key('password')), 'wrong');
+    await tester.tap(find.text('Login'));
+    await tester.pumpAndSettle();
+    expect(find.text('Tên đăng nhập hoặc mật khẩu không đúng'), findsOneWidget);
+    expect(find.text('TODOLIST'), findsNothing);
+    await tester.enterText(find.byKey(const Key('password')), 'demo12345');
     await tester.tap(find.text('Login'));
     await tester.pumpAndSettle();
     expect(find.text('TODOLIST'), findsOneWidget);
-    expect(await SessionStore().restore(), 'alice');
+    expect(await sessions.restore(), 'alice');
     expect((await SharedPreferences.getInstance()).getKeys(), {
       SessionStore.sessionKey,
     });
     await tester.pumpWidget(const SizedBox());
-    await tester.pumpWidget(
-      TodoApp(database: database, sessions: SessionStore()),
-    );
+    await tester.pumpWidget(TodoApp(database: database, sessions: sessions));
     await tester.pumpAndSettle();
     expect(find.text('TODOLIST'), findsOneWidget);
     await tester.tap(find.byTooltip('Logout'));
     await tester.pumpAndSettle();
     expect(find.text('Login'), findsOneWidget);
-    expect(await SessionStore().restore(), isNull);
+    expect(await sessions.restore(), isNull);
     await tester.pumpWidget(const SizedBox());
-    await tester.pumpWidget(
-      TodoApp(database: database, sessions: SessionStore()),
-    );
+    await tester.pumpWidget(TodoApp(database: database, sessions: sessions));
     await tester.pumpAndSettle();
     expect(find.text('Login'), findsOneWidget);
   });
@@ -79,8 +166,8 @@ void main() {
     tester.view.devicePixelRatio = 3;
     addTearDown(tester.view.reset);
     final database = MemoryTasks();
-    final sessions = SessionStore();
-    await sessions.login('alice');
+    final sessions = WidgetSessions(database);
+    await sessions.login('alice', 'demo12345');
     await tester.pumpWidget(TodoApp(database: database, sessions: sessions));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Add Task'));

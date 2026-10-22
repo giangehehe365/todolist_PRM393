@@ -7,7 +7,13 @@ import 'screens/session_gate.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(TodoApp(database: TaskDatabase(), sessions: SessionStore()));
+  final database = TaskDatabase();
+  runApp(
+    TodoApp(
+      database: database,
+      sessions: SessionStore(database: database),
+    ),
+  );
 }
 
 class TodoApp extends StatelessWidget {

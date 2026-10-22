@@ -51,8 +51,9 @@ class _SessionGateState extends State<SessionGate> {
     }
   }
 
-  Future<void> _login(String username) async {
-    await widget.sessions.login(username);
+  Future<void> _login(String username, String password, bool register) async {
+    if (register) await widget.sessions.register(username, password);
+    await widget.sessions.login(username, password);
     if (mounted) setState(() => _user = username.trim().toLowerCase());
   }
 
@@ -91,7 +92,7 @@ class _SessionGateState extends State<SessionGate> {
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key, required this.onLogin});
-  final Future<void> Function(String) onLogin;
+  final Future<void> Function(String, String, bool) onLogin;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -101,6 +102,8 @@ class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _username = TextEditingController();
   final _password = TextEditingController();
+  final _confirmation = TextEditingController();
+  bool _register = false;
   bool _busy = false;
   bool _hidePassword = true;
   String? _error;
@@ -109,6 +112,7 @@ class _LoginScreenState extends State<LoginScreen> {
   void dispose() {
     _username.dispose();
     _password.dispose();
+    _confirmation.dispose();
     super.dispose();
   }
 
@@ -120,12 +124,12 @@ class _LoginScreenState extends State<LoginScreen> {
       _error = null;
     });
     try {
-      await widget.onLogin(_username.text);
+      await widget.onLogin(_username.text, _password.text, _register);
+    } on AuthException catch (error) {
+      if (mounted) setState(() => _error = error.message);
     } catch (_) {
       if (mounted) {
-        setState(
-          () => _error = 'Không thể lưu phiên đăng nhập. Vui lòng thử lại.',
-        );
+        setState(() => _error = 'Không thể xử lý tài khoản. Vui lòng thử lại.');
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -134,7 +138,9 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('TodoList • Login')),
+    appBar: AppBar(
+      title: Text(_register ? 'TodoList • Đăng ký' : 'TodoList • Login'),
+    ),
     body: Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 440),
@@ -202,10 +208,34 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                       ),
                     ),
-                    validator: (value) => value == null || value.trim().isEmpty
-                        ? 'Vui lòng nhập mật khẩu'
-                        : null,
+                    validator: (value) {
+                      if (value == null || value.trim().isEmpty) {
+                        return 'Vui lòng nhập mật khẩu';
+                      }
+                      if (_register && value.length < 8) {
+                        return 'Mật khẩu phải có ít nhất 8 ký tự';
+                      }
+                      return null;
+                    },
                   ),
+                  if (_register) ...[
+                    const SizedBox(height: 16),
+                    TextFormField(
+                      key: const Key('confirmPassword'),
+                      controller: _confirmation,
+                      enabled: !_busy,
+                      obscureText: _hidePassword,
+                      autocorrect: false,
+                      enableSuggestions: false,
+                      decoration: const InputDecoration(
+                        labelText: 'Nhập lại mật khẩu',
+                        border: OutlineInputBorder(),
+                      ),
+                      validator: (value) => value != _password.text
+                          ? 'Mật khẩu nhập lại không khớp'
+                          : null,
+                    ),
+                  ],
                   if (_error != null)
                     Padding(
                       padding: const EdgeInsets.only(top: 12),
@@ -219,14 +249,30 @@ class _LoginScreenState extends State<LoginScreen> {
                   const SizedBox(height: 24),
                   ElevatedButton(
                     onPressed: _busy ? null : _submit,
-                    child: Text(_busy ? 'Đang đăng nhập...' : 'Login'),
+                    child: Text(
+                      _busy
+                          ? 'Đang xử lý...'
+                          : (_register ? 'Đăng ký' : 'Login'),
+                    ),
                   ),
-                  const SizedBox(height: 16),
-                  const Text(
-                    'Bản học tập: nhập tên đăng nhập và mật khẩu bất kỳ. '
-                    'Mật khẩu không được lưu hoặc xác thực. Dùng lại cùng tên để mở danh sách đã lưu.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: Colors.grey),
+                  TextButton(
+                    key: const Key('switchAuth'),
+                    onPressed: _busy
+                        ? null
+                        : () {
+                            setState(() {
+                              _register = !_register;
+                              _error = null;
+                              _password.clear();
+                              _confirmation.clear();
+                              _formKey.currentState?.reset();
+                            });
+                          },
+                    child: Text(
+                      _register
+                          ? 'Đã có tài khoản? Đăng nhập'
+                          : 'Chưa có tài khoản? Đăng ký',
+                    ),
                   ),
                 ],
               ),
